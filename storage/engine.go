@@ -26,7 +26,6 @@ type Transaction struct {
 	store *transactionStore
 }
 
-// dataStore implements metadataSource.
 type Cursor interface {
 	Next() bool
 	This() []block.Word
