@@ -115,8 +115,8 @@ func (tx *Transaction) PutEntity(typeID block.Word, row []block.Word) error {
 		return err
 	}
 
-	if meta[tableRootCol] == 0 {
-		err = addFirstTableBlock(tx, meta)
+	if meta.emptyTable() {
+		err = addFirstTableBlock(tx, &meta)
 		if err != nil {
 			return err
 		}
@@ -135,7 +135,7 @@ func (tx *Transaction) DeleteEntity(typeID block.Word, key []block.Word) error {
 		return err
 	}
 
-	if meta[tableRootCol] == 0 {
+	if meta.emptyTable() {
 		return nil
 	}
 
@@ -163,14 +163,18 @@ func getHeader(store block.Store) (header, error) {
 	}, nil
 }
 
-const (
-	tableIDCol = iota
-	tableColsCol
-	tableKeyCol
-	tableDepthCol
-	tableRootCol
-	tableColumnCount
-)
+type metaRow struct {
+	id            block.Word
+	cols, keyCols int
+	depth         int
+	root          block.Word
+}
+
+const metaWidth = 5
+
+func (r metaRow) emptyTable() bool {
+	return r.root == 0
+}
 
 type metadataSource interface {
 	metadataTree() *tree.Tree
@@ -183,7 +187,7 @@ func getEntities(source metadataSource, typeID block.Word, key []block.Word) Cur
 		return &failingCursor{err: err}
 	}
 
-	if meta[tableRootCol] == 0 {
+	if meta.emptyTable() {
 		return &failingCursor{}
 	}
 
@@ -191,29 +195,32 @@ func getEntities(source metadataSource, typeID block.Word, key []block.Word) Cur
 	return table.GetRange(key)
 }
 
-func queryMetadata(source metadataSource, typeID block.Word) ([]block.Word, error) {
+func queryMetadata(source metadataSource, typeID block.Word) (metaRow, error) {
 	metaT := source.metadataTree()
 	meta, err := metaT.Get([]block.Word{typeID})
 	if errors.Is(err, tree.ErrNotFound) {
-		return nil, fmt.Errorf("%w with id %x", ErrUnknownTable, typeID)
+		return metaRow{}, fmt.Errorf("%w with id %x", ErrUnknownTable, typeID)
 	}
 	if err != nil {
-		return nil, err
+		return metaRow{}, err
 	}
 
-	return meta, nil
+	return metaRow{
+		id:      meta[0],
+		cols:    int(meta[1]),
+		keyCols: int(meta[2]),
+		depth:   int(meta[3]),
+		root:    meta[4],
+	}, nil
 }
 
-func dataTree(source metadataSource, meta []block.Word) *tree.Tree {
-	keyCols := make([]int, meta[tableKeyCol])
+func dataTree(source metadataSource, meta metaRow) *tree.Tree {
+	keyCols := make([]int, meta.keyCols)
 	for i := range keyCols {
 		keyCols[i] = i
 	}
 
-	cols := int(meta[tableColsCol])
-	depth := int(meta[tableDepthCol])
-	root := meta[tableRootCol]
-	return tree.New(cols, keyCols, source.dataStore(), depth, root)
+	return tree.New(meta.cols, keyCols, source.dataStore(), meta.depth, meta.root)
 }
 
 func (e *Engine) dataStore() block.Store {
@@ -221,7 +228,7 @@ func (e *Engine) dataStore() block.Store {
 }
 
 func (e *Engine) metadataTree() *tree.Tree {
-	return tree.New(tableColumnCount, []int{tableIDCol}, e.store, e.depth, e.root)
+	return tree.New(metaWidth, []int{0}, e.store, e.depth, e.root)
 }
 
 func (tx *Transaction) dataStore() block.Store {
@@ -229,15 +236,21 @@ func (tx *Transaction) dataStore() block.Store {
 }
 
 func (tx *Transaction) metadataTree() *tree.Tree {
-	return tree.New(tableColumnCount, []int{tableIDCol}, tx.store, tx.e.depth, tx.e.root)
+	return tree.New(metaWidth, []int{0}, tx.store, tx.e.depth, tx.e.root)
 }
 
-func addFirstTableBlock(source metadataSource, meta []block.Word) error {
+func addFirstTableBlock(source metadataSource, meta *metaRow) error {
 	id, err := source.dataStore().AddBlock(&block.Block{})
 	if err != nil {
 		return err
 	}
 
-	meta[tableRootCol] = id
-	return source.metadataTree().Put(meta)
+	meta.root = id
+	return source.metadataTree().Put([]block.Word{
+		meta.id,
+		block.Word(meta.cols),
+		block.Word(meta.keyCols),
+		block.Word(meta.depth),
+		meta.root,
+	})
 }
