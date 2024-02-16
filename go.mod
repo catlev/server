@@ -10,8 +10,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/catlev/pkg => ../pkg
-
 require (
 	github.com/stretchr/testify v1.8.4
 	golang.org/x/crypto v0.18.0 // indirect
