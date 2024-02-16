@@ -170,7 +170,10 @@ type metaRow struct {
 	root          block.Word
 }
 
-const metaWidth = 5
+const (
+	metaWidth = 5
+	metaKey   = 1
+)
 
 func (r metaRow) emptyTable() bool {
 	return r.root == 0
@@ -215,12 +218,7 @@ func queryMetadata(source metadataSource, typeID block.Word) (metaRow, error) {
 }
 
 func dataTree(source metadataSource, meta metaRow) *tree.Tree {
-	keyCols := make([]int, meta.keyCols)
-	for i := range keyCols {
-		keyCols[i] = i
-	}
-
-	return tree.New(meta.cols, keyCols, source.dataStore(), meta.depth, meta.root)
+	return tree.New(meta.cols, meta.keyCols, source.dataStore(), meta.depth, meta.root)
 }
 
 func (e *Engine) dataStore() block.Store {
@@ -228,7 +226,7 @@ func (e *Engine) dataStore() block.Store {
 }
 
 func (e *Engine) metadataTree() *tree.Tree {
-	return tree.New(metaWidth, []int{0}, e.store, e.depth, e.root)
+	return tree.New(metaWidth, metaKey, e.store, e.depth, e.root)
 }
 
 func (tx *Transaction) dataStore() block.Store {
@@ -236,7 +234,7 @@ func (tx *Transaction) dataStore() block.Store {
 }
 
 func (tx *Transaction) metadataTree() *tree.Tree {
-	return tree.New(metaWidth, []int{0}, tx.store, tx.e.depth, tx.e.root)
+	return tree.New(metaWidth, metaKey, tx.store, tx.e.depth, tx.e.root)
 }
 
 func addFirstTableBlock(source metadataSource, meta *metaRow) error {
