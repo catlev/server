@@ -2,7 +2,7 @@ module github.com/catlev/server
 
 go 1.21
 
-require github.com/catlev/pkg v0.0.0-20240203114605-32d156d424f0
+require github.com/catlev/pkg v0.0.0-20240216204718-191edd9f6d96
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
@@ -12,6 +12,6 @@ require (
 
 require (
 	github.com/stretchr/testify v1.8.4
-	golang.org/x/crypto v0.18.0 // indirect
-	golang.org/x/sys v0.16.0 // indirect
+	golang.org/x/crypto v0.19.0 // indirect
+	golang.org/x/sys v0.17.0 // indirect
 )
