@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/catlev/pkg/store/block"
+	"github.com/catlev/pkg/domain"
 	"github.com/catlev/pkg/store/file"
 	"github.com/catlev/pkg/store/tree"
 )
@@ -16,8 +16,8 @@ type Engine struct {
 	lock  sync.RWMutex
 	f     *file.File
 	depth int
-	root  block.Word
-	store block.Store
+	root  domain.Word
+	store domain.Store
 }
 
 type Transaction struct {
@@ -28,7 +28,7 @@ type Transaction struct {
 
 type Cursor interface {
 	Next() bool
-	This() []block.Word
+	This() []domain.Word
 	Err() error
 }
 
@@ -56,7 +56,7 @@ func (e *Engine) Close() error {
 	return e.f.Close()
 }
 
-func (e *Engine) GetEntities(typeID block.Word, key []block.Word) Cursor {
+func (e *Engine) GetEntities(typeID domain.Word, key []domain.Word) Cursor {
 	e.lock.RLock()
 	defer e.lock.RUnlock()
 
@@ -80,8 +80,8 @@ func (e *Engine) Begin() (*Transaction, error) {
 		e: e,
 		store: &transactionStore{
 			tx:      tx,
-			next:    block.Word(stat.Size()),
-			updated: map[block.Word]block.Block{},
+			next:    domain.Word(stat.Size()),
+			updated: map[domain.Word]domain.Block{},
 			old:     e.store,
 		},
 	}, nil
@@ -99,14 +99,14 @@ func (tx *Transaction) Rollback() error {
 	return nil
 }
 
-func (tx *Transaction) GetEntities(typeID block.Word, key []block.Word) Cursor {
+func (tx *Transaction) GetEntities(typeID domain.Word, key []domain.Word) Cursor {
 	tx.lock.Lock()
 	defer tx.lock.Unlock()
 
 	return getEntities(tx, typeID, key)
 }
 
-func (tx *Transaction) PutEntity(typeID block.Word, row []block.Word) error {
+func (tx *Transaction) PutEntity(typeID domain.Word, row []domain.Word) error {
 	tx.lock.Lock()
 	defer tx.lock.Unlock()
 
@@ -126,7 +126,7 @@ func (tx *Transaction) PutEntity(typeID block.Word, row []block.Word) error {
 	return table.Put(row)
 }
 
-func (tx *Transaction) DeleteEntity(typeID block.Word, key []block.Word) error {
+func (tx *Transaction) DeleteEntity(typeID domain.Word, key []domain.Word) error {
 	tx.lock.Lock()
 	defer tx.lock.Unlock()
 
@@ -144,13 +144,13 @@ func (tx *Transaction) DeleteEntity(typeID block.Word, key []block.Word) error {
 }
 
 type header struct {
-	version block.Word
+	version domain.Word
 	depth   int
-	root    block.Word
+	root    domain.Word
 }
 
-func getHeader(store block.Store) (header, error) {
-	var b block.Block
+func getHeader(store domain.Store) (header, error) {
+	var b domain.Block
 	err := store.ReadBlock(0, &b)
 	if err != nil {
 		return header{}, err
@@ -164,10 +164,10 @@ func getHeader(store block.Store) (header, error) {
 }
 
 type metaRow struct {
-	id            block.Word
+	id            domain.Word
 	cols, keyCols int
 	depth         int
-	root          block.Word
+	root          domain.Word
 }
 
 const (
@@ -181,10 +181,26 @@ func (r metaRow) emptyTable() bool {
 
 type metadataSource interface {
 	metadataTree() *tree.Tree
-	dataStore() block.Store
+	dataStore() domain.Store
 }
 
-func getEntities(source metadataSource, typeID block.Word, key []block.Word) Cursor {
+func (e *Engine) dataStore() domain.Store {
+	return e.store
+}
+
+func (e *Engine) metadataTree() *tree.Tree {
+	return tree.New(metaWidth, metaKey, e.store, e.depth, e.root)
+}
+
+func (tx *Transaction) dataStore() domain.Store {
+	return tx.store
+}
+
+func (tx *Transaction) metadataTree() *tree.Tree {
+	return tree.New(metaWidth, metaKey, tx.store, tx.e.depth, tx.e.root)
+}
+
+func getEntities(source metadataSource, typeID domain.Word, key []domain.Word) Cursor {
 	meta, err := queryMetadata(source, typeID)
 	if err != nil {
 		return &failingCursor{err: err}
@@ -198,9 +214,9 @@ func getEntities(source metadataSource, typeID block.Word, key []block.Word) Cur
 	return table.GetRange(key)
 }
 
-func queryMetadata(source metadataSource, typeID block.Word) (metaRow, error) {
+func queryMetadata(source metadataSource, typeID domain.Word) (metaRow, error) {
 	metaT := source.metadataTree()
-	meta, err := metaT.Get([]block.Word{typeID})
+	meta, err := metaT.Get([]domain.Word{typeID})
 	if errors.Is(err, tree.ErrNotFound) {
 		return metaRow{}, fmt.Errorf("%w with id %x", ErrUnknownTable, typeID)
 	}
@@ -221,34 +237,26 @@ func dataTree(source metadataSource, meta metaRow) *tree.Tree {
 	return tree.New(meta.cols, meta.keyCols, source.dataStore(), meta.depth, meta.root)
 }
 
-func (e *Engine) dataStore() block.Store {
-	return e.store
-}
-
-func (e *Engine) metadataTree() *tree.Tree {
-	return tree.New(metaWidth, metaKey, e.store, e.depth, e.root)
-}
-
-func (tx *Transaction) dataStore() block.Store {
-	return tx.store
-}
-
-func (tx *Transaction) metadataTree() *tree.Tree {
-	return tree.New(metaWidth, metaKey, tx.store, tx.e.depth, tx.e.root)
+func getTable(source metadataSource, typeID domain.Word) (*tree.Tree, error) {
+	meta, err := queryMetadata(source, typeID)
+	if err != nil {
+		return nil, err
+	}
+	return dataTree(source, meta), nil
 }
 
 func addFirstTableBlock(source metadataSource, meta *metaRow) error {
-	id, err := source.dataStore().AddBlock(&block.Block{})
+	id, err := source.dataStore().AddBlock(&domain.Block{})
 	if err != nil {
 		return err
 	}
 
 	meta.root = id
-	return source.metadataTree().Put([]block.Word{
+	return source.metadataTree().Put([]domain.Word{
 		meta.id,
-		block.Word(meta.cols),
-		block.Word(meta.keyCols),
-		block.Word(meta.depth),
+		domain.Word(meta.cols),
+		domain.Word(meta.keyCols),
+		domain.Word(meta.depth),
 		meta.root,
 	})
 }

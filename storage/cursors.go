@@ -1,6 +1,6 @@
 package storage
 
-import "github.com/catlev/pkg/store/block"
+import "github.com/catlev/pkg/domain"
 
 type failingCursor struct {
 	err error
@@ -17,6 +17,6 @@ func (failingCursor) Next() bool {
 }
 
 // This implements Cursor.
-func (failingCursor) This() []block.Word {
+func (failingCursor) This() []domain.Word {
 	panic("unimplemented")
 }
